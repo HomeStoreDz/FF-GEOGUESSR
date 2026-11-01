@@ -181,43 +181,45 @@ function bindEvents(){
  document.querySelectorAll('.map-choice[data-map]').forEach(btn=>btn.addEventListener('click',()=>{document.querySelectorAll('.map-choice[data-map]').forEach(b=>b.classList.toggle('selected',b===btn));}));
  $('start-game-btn').addEventListener('click',()=>{if(!requireName())return;startGame(selectedDifficulty);});
 
- // عند الضغط على إنشاء غرفة: يتم توليد الرقم وإنشاء الغرفة فوراً في قاعدة البيانات في وضع الانتظار
+ // إنشاء الغرفة وفحص الأخطاء
  $('create-room-btn').addEventListener('click', async () => {
    if(!requireName()) return;
    const roomId = String(Math.floor(100000 + Math.random() * 900000));
    currentRoomId = roomId;
    
-   // إنشاء الغرفة افتراضياً بكلمة مرور مؤقتة في Supabase لكي تظهر للبحث فوراً
    showToast('جاري إنشاء الغرفة...');
-   const { data, error } = await supabaseClient.rpc('create_game_room', {
-     p_room_id: roomId,
-     p_password: '123',
-     p_host_name: playerName(),
-     p_map_name: 'bermuda',
-     p_difficulty: selectedDifficulty,
-     p_host_token: playerToken
-   });
+   try {
+     const { data, error } = await supabaseClient.rpc('create_game_room', {
+       p_room_id: roomId,
+       p_password: '123',
+       p_host_name: playerName(),
+       p_map_name: 'bermuda',
+       p_difficulty: selectedDifficulty,
+       p_host_token: playerToken
+     });
 
-   if (error || (data && !data.success)) {
-     showToast('خطأ في إنشاء الغرفة');
-     return;
+     if (error || (data && !data.success)) {
+       showToast('خطأ في إنشاء الغرفة: ' + (error?.message || data?.message || 'حاول مجدداً'));
+       return;
+     }
+
+     $('room-id-display').textContent = roomId;
+     $('room-password-display').value = '123';
+     $('host-name-display').textContent = playerName();
+     $('guest-name-display').textContent = 'بانتظار لاعب...';
+     $('guest-status').textContent = 'غير متصل';
+     
+     $('create-room-panel').classList.remove('hidden');
+     $('search-room-panel').classList.add('hidden');
+     $('joined-room-panel').classList.add('hidden');
+     showToast('تم إنشاء الغرفة بنجاح! شارك الـ ID مع صديقك.');
+   } catch (err) {
+     showToast('خطأ اتصال: ' + err.message);
    }
-
-   $('room-id-display').textContent = roomId;
-   $('room-password-display').value = '123';
-   $('host-name-display').textContent = playerName();
-   $('guest-name-display').textContent = 'بانتظار لاعب...';
-   $('guest-status').textContent = 'غير متصل';
-   
-   $('create-room-panel').classList.remove('hidden');
-   $('search-room-panel').classList.add('hidden');
-   $('joined-room-panel').classList.add('hidden');
-   showToast('تم إنشاء الغرفة بنجاح! شارك الـ ID مع صديقك.');
  });
 
  $('show-search-btn').addEventListener('click',()=>{$('search-room-panel').classList.remove('hidden');$('create-room-panel').classList.add('hidden');$('joined-room-panel').classList.add('hidden');$('found-room-panel').classList.add('hidden');});
  
- // زر ابدأ اللعب للمضيف
  $('host-start-btn').addEventListener('click', async () => {
    if(!currentRoomId) {
      showToast('أنشئ غرفة أولًا.');
@@ -225,7 +227,6 @@ function bindEvents(){
    }
    const password = $('room-password-display').value.trim();
    if(password) {
-     // تحديث كلمة المرور إذا قام بتغييرها
      await supabaseClient.from('rooms').update({ password: password }).eq('id', currentRoomId);
    }
 
@@ -243,24 +244,36 @@ function bindEvents(){
  });
 
  let foundRoomData = null;
+ // زر البحث مع معالجة الأخطاء والتنبيهات المباشرة
  $('search-room-btn').addEventListener('click', async () => {
-   const id = $('search-room-id').value.trim();
-   if(!id) {
-     showToast('اكتب ID الغرفة أولاً.');
-     return;
+   try {
+     const id = $('search-room-id').value.trim();
+     if(!id) {
+       showToast('اكتب ID الغرفة أولاً.');
+       return;
+     }
+     showToast('جاري البحث عن الغرفة...');
+     
+     const { data, error } = await supabaseClient.from('rooms').select('id, host_name, status').eq('id', id).maybeSingle();
+     
+     if (error) {
+       showToast('خطأ في البحث: ' + error.message);
+       $('found-room-panel').classList.add('hidden');
+       return;
+     }
+     if (!data) {
+       showToast('الغرفة غير موجودة بهذا الـ ID.');
+       $('found-room-panel').classList.add('hidden');
+       return;
+     }
+     
+     foundRoomData = data;
+     $('found-room-message').textContent = `تم العثور على الغرفة الخاصة بـ: ${data.host_name}`;
+     $('found-room-panel').classList.remove('hidden');
+     showToast('تم العثور على الغرفة بنجاح!');
+   } catch (err) {
+     showToast('حدث خطأ أثناء البحث: ' + err.message);
    }
-   showToast('جاري البحث عن الغرفة...');
-   const { data, error } = await supabaseClient.from('rooms').select('id, host_name, status').eq('id', id).maybeSingle();
-   
-   if (error || !data) {
-     showToast('الغرفة غير موجودة أو لم يتم تفعيلها.');
-     $('found-room-panel').classList.add('hidden');
-     return;
-   }
-   foundRoomData = data;
-   $('found-room-message').textContent = `تم العثور على الغرفة الخاصة بـ: ${data.host_name}`;
-   $('found-room-panel').classList.remove('hidden');
-   showToast('تم العثور على الغرفة بنجاح!');
  });
 
  $('join-room-btn').addEventListener('click', async () => {
@@ -276,25 +289,29 @@ function bindEvents(){
    }
 
    showToast('جاري الانضمام إلى الغرفة...');
-   const { data, error } = await supabaseClient.rpc('join_game_room', {
-     p_room_id: foundRoomData.id,
-     p_password: password,
-     p_guest_name: playerName(),
-     p_guest_token: playerToken
-   });
+   try {
+     const { data, error } = await supabaseClient.rpc('join_game_room', {
+       p_room_id: foundRoomData.id,
+       p_password: password,
+       p_guest_name: playerName(),
+       p_guest_token: playerToken
+     });
 
-   if (error || (data && !data.success)) {
-     showToast('خطأ: ' + (error?.message || data?.message || 'فشل الانضمام (تأكد من كلمة المرور)'));
-     return;
+     if (error || (data && !data.success)) {
+       showToast('خطأ: ' + (error?.message || data?.message || 'فشل الانضمام (تأكد من كلمة المرور)'));
+       return;
+     }
+
+     currentRoomId = foundRoomData.id;
+     localStorage.setItem('ff_room_id', currentRoomId);
+     $('joined-host-name').textContent = foundRoomData.host_name;
+     $('joined-guest-name').textContent = playerName();
+     $('joined-room-panel').classList.remove('hidden');
+     $('search-room-panel').classList.add('hidden');
+     showToast('تم الانضمام للغرفة بنجاح! 🎉');
+   } catch (err) {
+     showToast('خطأ في الانضمام: ' + err.message);
    }
-
-   currentRoomId = foundRoomData.id;
-   localStorage.setItem('ff_room_id', currentRoomId);
-   $('joined-host-name').textContent = foundRoomData.host_name;
-   $('joined-guest-name').textContent = playerName();
-   $('joined-room-panel').classList.remove('hidden');
-   $('search-room-panel').classList.add('hidden');
-   showToast('تم الانضمام للغرفة بنجاح! 🎉');
  });
 
  el.guess.addEventListener('click',submitGuess);
